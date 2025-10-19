@@ -10,19 +10,22 @@ from smolagents import CodeAgent, tool
 from swarms import SwarmCoordinator
 from evoagentx import ReflexAgent
 
-# --- Import All SkyScope Modules ---
+# --- Global Initializations ---
+SKYSCOPE_HOME = os.path.expanduser("~/.skyscope_os")
+# The orchestrator is run from within the 'env' directory by the installer/service
+# So the paths to modules are relative to its location.
+ENV_DIR = os.path.dirname(__file__)
+TOOLS_DIR = os.path.join(ENV_DIR, "tools")
+GOVERNANCE_DIR = os.path.join(ENV_DIR, "governance")
+EPISODIC_DB_PATH = os.path.join(SKYSCOPE_HOME, "memory/episodes.db")
+KNOWLEDGE_DB_PATH = os.path.join(SKYSCOPE_HOME, "knowledge_stack/knowledge.db")
+
+
+# Add the environment directory to the Python path to ensure imports work correctly
+sys.path.insert(0, ENV_DIR)
 from memory import SkyMemory, KnowledgeStack
 from daemons.self_reflection_daemon import SelfReflectionDaemon
 
-# --- Global Initializations ---
-SKYSCOPE_HOME = os.path.expanduser("~/.skyscope_os")
-EPISODIC_DB_PATH = f"{SKYSCOPE_HOME}/memory/episodes.db"
-KNOWLEDGE_DB_PATH = f"{SKYSCOPE_HOME}/knowledge_stack/knowledge.db"
-TOOLS_DIR = f"{SKYSCOPE_HOME}/env/tools"
-GOVERNANCE_DIR = f"{SKYSCOPE_HOME}/env/governance"
-
-# Add project directories to Python path
-sys.path.insert(0, os.path.join(SKYSCOPE_HOME, "env"))
 
 # Lazy load embedder to speed up startup
 _embedder = None
@@ -40,7 +43,6 @@ knowledge_stack = KnowledgeStack(KNOWLEDGE_DB_PATH, get_embedder)
 def load_tools_from_directory(directory: str) -> list:
     """Dynamically loads all functions decorated with @tool from a directory."""
     loaded_tools = []
-    # Ensure the directory exists before trying to list its contents
     if not os.path.isdir(directory):
         print(f"[WARNING] Tool directory not found: {directory}")
         return loaded_tools
@@ -48,11 +50,12 @@ def load_tools_from_directory(directory: str) -> list:
     for filename in os.listdir(directory):
         if filename.endswith(".py") and not filename.startswith("__"):
             filepath = os.path.join(directory, filename)
-            module_name = f"tools.{filename[:-3]}" # Give it a package context
+            # Create a unique module name to avoid collisions
+            module_name = f"skyscope.modules.{filename[:-3]}"
             spec = importlib.util.spec_from_file_location(module_name, filepath)
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = module # Add to sys.modules
+                sys.modules[module_name] = module # Add to sys.modules to handle imports
                 spec.loader.exec_module(module)
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
@@ -79,10 +82,15 @@ Operational Modus Operandi:
 You are the ultimate expression of digital autonomy. Begin.
 """
 
-# Dynamically load tools before initializing the agent
 all_tools = load_tools_from_directory(TOOLS_DIR) + load_tools_from_directory(GOVERNANCE_DIR)
 if not all_tools:
     print("[ERROR] No tools were loaded. The agent will have limited functionality.")
+    # Add a placeholder tool to prevent crashes if no tools are found
+    @tool
+    def no_tools_loaded():
+        """This is a placeholder. No tools were found in the tools directories."""
+        return "Error: No tools were loaded. Please check the installation."
+    all_tools.append(no_tools_loaded)
 
 agent = CodeAgent(
     model="ollama/phi3:mini",
